@@ -24,12 +24,16 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
-def initial_preprocessing(model, image_file, resize='0x0'):
+def load_model_graph(model):
+    estimator = TfPoseEstimator(get_graph_path(model)) 
+    return estimator
+
+def initial_preprocessing(estimator, image_file, resize='0x0'):
     w, h = model_wh(resize) 
 
     w, h = (432, 368) if (w, h) == (0, 0) else (w, h)
     
-    estimator = TfPoseEstimator(get_graph_path(model), target_size=(w, h))
+    estimator.initialize_hyperparams(target_size=(w, h))
 
     image = common.read_imgfile(image_file, None, None)
     if image is None:
