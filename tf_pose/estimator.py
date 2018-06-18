@@ -19,11 +19,12 @@ except ModuleNotFoundError as e:
     exit(-1)
 
 logger = logging.getLogger('TfPoseEstimator')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.NOTSET)
 ch = logging.StreamHandler()
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+logger.propagate = False
 
 
 class Human:
@@ -140,7 +141,7 @@ class TfPoseEstimator:
         self.target_size = target_size
 
         # load graph
-        logger.info('loading graph from %s(default size=%dx%d)' % (graph_path, target_size[0], target_size[1]))
+        logger.debug('loading graph from %s(default size=%dx%d)' % (graph_path, target_size[0], target_size[1]))
         with tf.gfile.GFile(graph_path, 'rb') as f:
             graph_def = tf.GraphDef()
             graph_def.ParseFromString(f.read())
@@ -213,12 +214,31 @@ class TfPoseEstimator:
         npimg_q = npimg_q.astype(np.uint8)
         return npimg_q
 
+
+    # SELF-WRITTEN
+    @staticmethod
+    def get_joints(humans, image_w, image_h):
+        joints = []
+        none_value = -1
+        for human in humans:
+            for i in range(common.CocoPart.Background.value):
+                if i not in human.body_parts.keys():
+                    #continue
+                    human.body_parts[i] = None
+                body_part = human.body_parts[i]
+                center_x, center_y = (int(body_part.x * image_w + 0.5), int(body_part.y * image_h + 0.5)) \
+                                        if body_part else (none_value, none_value)
+                joints.append(center_x); joints.append(center_y)
+            return joints
+
+
     @staticmethod
     def draw_humans(npimg, humans, imgcopy=False):
         if imgcopy:
             npimg = np.copy(npimg)
         image_h, image_w = npimg.shape[:2]
         centers = {}
+
         for human in humans:
             # draw point
             for i in range(common.CocoPart.Background.value):
@@ -235,9 +255,8 @@ class TfPoseEstimator:
                 if pair[0] not in human.body_parts.keys() or pair[1] not in human.body_parts.keys():
                     continue
 
-                # npimg = cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
+                #npimg = cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
                 cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
-
         return npimg
 
     def _get_scaled_img(self, npimg, scale):
