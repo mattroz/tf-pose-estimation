@@ -148,13 +148,14 @@ class TfPoseEstimator:
 
         self.graph = tf.get_default_graph()
         tf.import_graph_def(graph_def, name='TfPoseEstimator')
-    
+        self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
+
 
     def initialize_hyperparams(self, target_size=(320, 240), tf_config=None):
         logger.debug('ENTERED INITIALIZE_HYPERPARAMS() METHOD')
         self.target_size = target_size
 
-        self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
+        #self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
 
         # for op in self.graph.get_operations():
         #     print(op.name)
