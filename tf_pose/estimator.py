@@ -137,17 +137,20 @@ class PoseEstimator:
 class TfPoseEstimator:
     # TODO : multi-scale
 
-    def __init__(self, graph_path, target_size=(320, 240), tf_config=None):
-        self.target_size = target_size
-
+    def __init__(self, graph_path):
         # load graph
-        logger.debug('loading graph from %s(default size=%dx%d)' % (graph_path, target_size[0], target_size[1]))
+        logger.debug('loading graph from %s' % (graph_path))
         with tf.gfile.GFile(graph_path, 'rb') as f:
             graph_def = tf.GraphDef()
             graph_def.ParseFromString(f.read())
 
         self.graph = tf.get_default_graph()
         tf.import_graph_def(graph_def, name='TfPoseEstimator')
+    
+
+    def initialize_hyperparams(self, target_size=(320, 240), tf_config=None):
+        self.target_size = target_size
+
         self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
 
         # for op in self.graph.get_operations():
