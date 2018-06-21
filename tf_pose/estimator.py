@@ -19,11 +19,12 @@ except ModuleNotFoundError as e:
     exit(-1)
 
 logger = logging.getLogger('TfPoseEstimator')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.NOTSET)
 ch = logging.StreamHandler()
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+logger.propagate = False
 
 
 class Human:
@@ -45,6 +46,7 @@ class Human:
         return '%d-%d' % (part_idx, idx)
 
     def add_pair(self, pair):
+        logger.debug('ENTERED ADD_PAIR() METHOD')
         self.pairs.append(pair)
         self.body_parts[pair.part_idx1] = BodyPart(Human._get_uidx(pair.part_idx1, pair.idx1),
                                                    pair.part_idx1,
@@ -105,6 +107,7 @@ class PoseEstimator:
 
     @staticmethod
     def estimate_paf(peaks, heat_mat, paf_mat):
+        logger.debug('ENTERED ESTIMATE_PAF() METHOD')
         pafprocess.process_paf(peaks, heat_mat, paf_mat)
 
         humans = []
@@ -136,11 +139,9 @@ class PoseEstimator:
 class TfPoseEstimator:
     # TODO : multi-scale
 
-    def __init__(self, graph_path, target_size=(320, 240), tf_config=None):
-        self.target_size = target_size
-
+    def __init__(self, graph_path):
         # load graph
-        logger.info('loading graph from %s(default size=%dx%d)' % (graph_path, target_size[0], target_size[1]))
+        logger.debug('loading graph from %s' % (graph_path))
         with tf.gfile.GFile(graph_path, 'rb') as f:
             graph_def = tf.GraphDef()
             graph_def.ParseFromString(f.read())
@@ -148,6 +149,13 @@ class TfPoseEstimator:
         self.graph = tf.get_default_graph()
         tf.import_graph_def(graph_def, name='TfPoseEstimator')
         self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
+
+
+    def initialize_hyperparams(self, target_size=(320, 240), tf_config=None):
+        logger.debug('ENTERED INITIALIZE_HYPERPARAMS() METHOD')
+        self.target_size = target_size
+
+        #self.persistent_sess = tf.Session(graph=self.graph, config=tf_config)
 
         # for op in self.graph.get_operations():
         #     print(op.name)
@@ -165,7 +173,6 @@ class TfPoseEstimator:
                                                      align_corners=False, name='upsample_pafmat')
         smoother = Smoother({'data': self.tensor_heatMat_up}, 25, 3.0)
         gaussian_heatMat = smoother.get_output()
-
         max_pooled_in_tensor = tf.nn.pool(gaussian_heatMat, window_shape=(3, 3), pooling_type='MAX', padding='SAME')
         self.tensor_peaks = tf.where(tf.equal(gaussian_heatMat, max_pooled_in_tensor), gaussian_heatMat,
                                      tf.zeros_like(gaussian_heatMat))
@@ -173,12 +180,13 @@ class TfPoseEstimator:
         self.heatMat = self.pafMat = None
 
         # warm-up
-        self.persistent_sess.run(tf.variables_initializer(
-            [v for v in tf.global_variables() if
-             v.name.split(':')[0] in [x.decode('utf-8') for x in
-                                      self.persistent_sess.run(tf.report_uninitialized_variables())]
-             ])
-        )
+        logger.debug('START WARMUP 1')
+        self.persistent_sess.run(tf.variables_initializer([v for v in tf.global_variables()]))#if
+             #v.name.split(':')[0] in [x.decode('utf-8') for x in
+                                      #self.persistent_sess.run(tf.report_uninitialized_variables())]
+             #])
+        #)
+        logger.debug('START WARMUP 2')
         self.persistent_sess.run(
             [self.tensor_peaks, self.tensor_heatMat_up, self.tensor_pafMat_up],
             feed_dict={
@@ -186,6 +194,7 @@ class TfPoseEstimator:
                 self.upsample_size: [target_size[1], target_size[0]]
             }
         )
+        logger.debug('START WARMUP 3')
         self.persistent_sess.run(
             [self.tensor_peaks, self.tensor_heatMat_up, self.tensor_pafMat_up],
             feed_dict={
@@ -193,6 +202,7 @@ class TfPoseEstimator:
                 self.upsample_size: [target_size[1] // 2, target_size[0] // 2]
             }
         )
+        logger.debug('START WARMUP 4')
         self.persistent_sess.run(
             [self.tensor_peaks, self.tensor_heatMat_up, self.tensor_pafMat_up],
             feed_dict={
@@ -200,6 +210,7 @@ class TfPoseEstimator:
                 self.upsample_size: [target_size[1] // 4, target_size[0] // 4]
             }
         )
+        logger.debug('END WARMUPS')
 
     def __del__(self):
         # self.persistent_sess.close()
@@ -207,18 +218,41 @@ class TfPoseEstimator:
 
     @staticmethod
     def _quantize_img(npimg):
+        logger.debug('ENTERED _QUANTIZE_IMG() METHOD')
         npimg_q = npimg + 1.0
         npimg_q /= (2.0 / 2 ** 8)
         # npimg_q += 0.5
         npimg_q = npimg_q.astype(np.uint8)
         return npimg_q
 
+
+    # SELF-WRITTEN
+    @staticmethod
+    def get_joints(humans, image_w, image_h):
+        logger.debug('ENTERED GET_JOINT() METHOD')
+        joints = []
+        none_value = -1
+        for human in humans:
+            for i in range(common.CocoPart.Background.value):
+                if i not in human.body_parts.keys():
+                    #continue
+                    human.body_parts[i] = None
+                body_part = human.body_parts[i]
+                center_x, center_y = (int(body_part.x * image_w + 0.5), int(body_part.y * image_h + 0.5)) \
+                                        if body_part else (none_value, none_value)
+                joints.append(center_x); joints.append(center_y)
+            return joints
+        logger.debug('EXITED GET_JOINT() METHOD')
+
+
     @staticmethod
     def draw_humans(npimg, humans, imgcopy=False):
+        logger.debug('ENTERED DRAW_HUMANS() METHOD')
         if imgcopy:
             npimg = np.copy(npimg)
         image_h, image_w = npimg.shape[:2]
         centers = {}
+
         for human in humans:
             # draw point
             for i in range(common.CocoPart.Background.value):
@@ -235,12 +269,12 @@ class TfPoseEstimator:
                 if pair[0] not in human.body_parts.keys() or pair[1] not in human.body_parts.keys():
                     continue
 
-                # npimg = cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
+                #npimg = cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
                 cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
-
         return npimg
 
     def _get_scaled_img(self, npimg, scale):
+        logger.debug('ENTERED _GET_SCALED_IMG() METHOD')
         get_base_scale = lambda s, w, h: max(self.target_size[0] / float(h), self.target_size[1] / float(w)) * s
         img_h, img_w = npimg.shape[:2]
 
@@ -326,6 +360,7 @@ class TfPoseEstimator:
             return [roi], [(ratio_x, ratio_y, ratio_w, ratio_h)]
 
     def _crop_roi(self, npimg, ratio_x, ratio_y):
+        logger.debug('ENTERED _CROP_ROI() METHOD')
         target_w, target_h = self.target_size
         h, w = npimg.shape[:2]
         x = max(int(w * ratio_x - .5), 0)
@@ -342,6 +377,8 @@ class TfPoseEstimator:
             return cropped
 
     def inference(self, npimg, resize_to_default=True, upsample_size=1.0):
+        logger.debug('ENTERED INFERENCE() METHOD')
+
         if npimg is None:
             raise Exception('The image is not valid. Please check your image exists.')
 
